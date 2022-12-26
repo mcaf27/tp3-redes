@@ -1,67 +1,92 @@
 import socket, json
-from struct import pack, unpack
-from sys import argv
+from sys import argv, stdin
+from select import select
 
 OK = 0b0100111101001011
 ERRO = 0b0100010101010010
+
 OI = 0b0100111101001001
 FLW = 0b0100011001001100
 MSG = 0b0100110101010011
 
 SERVER_ID = 65535
 
+ID = argv[1]
+PORT = argv[2]
+
 class Client:
   def __init__(this):
     this.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    this._id = int(argv[1])
+    this._id = int(ID)
+    this.seq_num = 0
+
+  def message(this, msg_type, dest_id, text=None):
+    msg_content = { 'MSG_TYPE': msg_type, 'ORIG_ID': this._id, 'DEST_ID': dest_id, 'SEQ_NUM': this.seq_num, 'MSG_TEXT': text }
+    return json.dumps(msg_content).encode('ascii')
 
   def connect_to_server(this, port, host='127.0.0.1'):
-    # enviar mensagem de OI
-
-    msg_type = OI
-    orig_id = this._id
-    dest_id = SERVER_ID
-    seq_num = 0b0000000000000000
-
-    # msg = pack('<H', msg_type) + pack('<H', orig_id) + pack('<H', dest_id) + pack('<H', seq_num)
-    # msg = pack('<4H', msg_type, orig_id, dest_id, seq_num)
-
-    msg_content = { 'MSG_TYPE': msg_type, 'ORIG_ID': orig_id, 'DEST_ID': dest_id, 'SEQ_NUM': seq_num }
-
-    msg = json.dumps(msg_content).encode('ascii')
-
+    msg = this.message(OI, SERVER_ID)
     this.socket.connect((host, int(port)))
-
     this.socket.send(msg)
 
-
   def disconnect(this):
-    # enviar mensagem de FLW
+    msg = this.message(FLW, SERVER_ID)
+    this.socket.send(msg)
+
+    # this.socket.recv(1024) # esperar confirmação, se não re-enviar ?
+
     this.socket.close()
 
   def send_message_to(this, dest, text):
+    msg = this.message(MSG, dest, text)
+    this.socket.send(msg)
 
-    # enviar mensagem para dest
+    # esperar confirmação?
 
-    pass
+  def open(this):
 
-  def read(this):
+    inputs = [this.socket.fileno(), stdin.fileno()]
+    outputs = []
+
     while True:
-      in_ = input()
-      inputs = in_.split(' ')
-      msg_type = inputs[0]
+      readable, writable, exceptional = select(inputs, outputs, inputs)
 
-      print('lido:', msg_type)
+      for item in readable:
+        if item == this.socket.fileno():
+          
+          data = this.socket.recv(1024)
+          
+          data = json.loads(data)
 
-      if msg_type == 'M':
-        dest = inputs[1]
-        text = ' '.join(inputs[2:])
+          msg_type = data.get('MSG_TYPE')
 
-        this.send_message_to(dest, text)
+          if msg_type == MSG:
+            orig_id = data.get('DEST_ID')
+            text = data.get('MSG_TEXT')
+            
+            print(f'Mensagem de {orig_id}: {text}')
 
-      elif msg_type == 'S':
-        this.disconnect()
+            ok_msg = this.message(OK, SERVER_ID)
+            this.socket.send(ok_msg)
+
+        elif item == stdin.fileno():
+          in_ = input()
+
+          stdinputs = in_.split(' ')
+
+          msg_type = stdinputs[0]
+
+          if msg_type == 'M':
+            dest = stdinputs[1]
+            text = ' '.join(stdinputs[2:])
+
+            this.send_message_to(dest, text)
+          
+          elif msg_type == 'S':
+            this.disconnect()
+            break
 
 client = Client()
-client.connect_to_server(8001)
-client.disconnect()
+client.connect_to_server(PORT)
+client.open()
+# client.disconnect()
