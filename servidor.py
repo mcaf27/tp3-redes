@@ -22,8 +22,8 @@ class Server:
 
     this.sckt.listen()
 
-  def message(this, msg_type, dest_id, seq_num, text=None):
-    msg_content = { 'MSG_TYPE': msg_type, 'ORIG_ID': SERVER_ID, 'DEST_ID': dest_id, 'SEQ_NUM': seq_num, 'MSG_TEXT': text }
+  def message(this, msg_type, dest_id, seq_num, text=None, orig_id=SERVER_ID):
+    msg_content = { 'MSG_TYPE': msg_type, 'ORIG_ID': orig_id, 'DEST_ID': dest_id, 'SEQ_NUM': seq_num, 'MSG_TEXT': text }
     return json.dumps(msg_content).encode('ascii')
 
   def sendOK(this, dest_id, seq_num):
@@ -82,16 +82,49 @@ while inputs:
             dest_id = msg.get('DEST_ID')
             text = msg.get('MSG_TEXT')
 
+            # broadcast
+            if int(dest_id) == 0:
+              ok_msg = server.message(OK, orig_id, seq_num)
+              s.send(ok_msg)
+
+              for dest_index, client_id in enumerate(client_ids):
+                if client_id != orig_id and client_id is not None:
+                  
+                  txt_msg = server.message(MSG, client_id, client_seq_nums[int(dest_index)] + 1, text, orig_id=orig_id)
+                  inputs[int(dest_index)].send(txt_msg)
+
+                  ack = s.recv(1024)
+                  ack = json.loads(ack)
+                  ack_type = ack.get('MSG_TYPE')
+
+                  if ack_type == OK:
+                    print(f'Mensagem enviada com sucesso para {client_id}')
+                    continue
+                    # ack_type nunca será ERRO
+
             if int(dest_id) in client_ids:
               ok_msg = server.message(OK, orig_id, seq_num)
               s.send(ok_msg)
 
               dest_index = client_ids.index(int(dest_id))
               # client_seq_nums[int(dest_index)] += 1
-              txt_msg = server.message(MSG, dest_id, client_seq_nums[int(dest_index)] + 1, text)
+              txt_msg = server.message(MSG, dest_id, client_seq_nums[int(dest_index)] + 1, text, orig_id=orig_id)
 
-              print(inputs[int(dest_index)])
-              inputs[int(dest_index)].send(txt_msg)
+              dest_socket = inputs[int(dest_index)]
+              
+              dest_socket.send(txt_msg)
+
+              # AQUI
+              print('recebendo msg de ok...')
+              ack = dest_socket.recv(1024)
+              print(ack)
+              ack = json.loads(ack.decode('ascii'))
+              ack_type = ack.get('MSG_TYPE')
+
+              if ack_type == OK:
+                print(f'Mensagem enviada com sucesso para {client_id}')
+                continue
+                # ack_type nunca será ERRO
               
             else:
               err_msg = server.message(ERRO, orig_id, seq_num)

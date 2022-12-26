@@ -29,19 +29,50 @@ class Client:
     this.socket.connect((host, int(port)))
     this.socket.send(msg)
 
+    data = this.socket.recv(1024)
+    msg_type = json.loads(data).get('MSG_TYPE')
+
+    if msg_type == OK:
+      print('Conexão com o servidor realizada com sucesso')
+    elif msg_type == ERRO:
+      print('Erro ao conectar com o servidor')
+
+    this.seq_num += 1
+
   def disconnect(this):
     msg = this.message(FLW, SERVER_ID)
     this.socket.send(msg)
 
-    # this.socket.recv(1024) # esperar confirmação, se não re-enviar ?
+    data = this.socket.recv(1024)
+    msg_type = json.loads(data).get('MSG_TYPE')
 
-    this.socket.close()
+    if msg_type == OK:
+      this.socket.close()
+      return True
+
+    this.seq_num += 1
+    
+    return False
 
   def send_message_to(this, dest, text):
-    msg = this.message(MSG, dest, text)
+
+    dest_id = dest if dest != 'broadcast' else format(0, '016b')
+
+    msg_content = { 'MSG_TYPE': MSG, 'ORIG_ID': this._id, 'DEST_ID': dest_id, 'SEQ_NUM': this.seq_num, 'MSG_LENGTH': format(len(text.encode('ascii')), '032b'), 'MSG_TEXT': text }
+    msg = json.dumps(msg_content).encode('ascii')
+
     this.socket.send(msg)
 
+    this.seq_num += 1
+
     # esperar confirmação?
+
+    data = this.socket.recv(1024)
+    data = json.loads(data)
+    msg_type = data.get('MSG_TYPE')
+    
+    if msg_type == OK:
+      pass
 
   def open(this):
 
@@ -55,18 +86,19 @@ class Client:
         if item == this.socket.fileno():
           
           data = this.socket.recv(1024)
-          
+          print('dados recebidos', data)
           data = json.loads(data)
 
           msg_type = data.get('MSG_TYPE')
 
           if msg_type == MSG:
-            orig_id = data.get('DEST_ID')
+            orig_id = data.get('ORIG_ID')
             text = data.get('MSG_TEXT')
             
             print(f'Mensagem de {orig_id}: {text}')
 
             ok_msg = this.message(OK, SERVER_ID)
+            print('enviando msg de ok', ok_msg)
             this.socket.send(ok_msg)
 
         elif item == stdin.fileno():
@@ -83,8 +115,9 @@ class Client:
             this.send_message_to(dest, text)
           
           elif msg_type == 'S':
-            this.disconnect()
-            break
+            disc = this.disconnect()
+            if disc:
+              break
 
 client = Client()
 client.connect_to_server(PORT)
